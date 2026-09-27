@@ -27,16 +27,18 @@ niche = st.text_input("Enter a product niche:", value="pet gadgets")
 
 if st.button("Hunt Products", type="primary"):
     try:
-        response = requests.post(
-            f"{API_URL}/hunt",
-            json={"niche": niche},
-            timeout=REQUEST_TIMEOUT,
-        )
-        response.raise_for_status()
-        data = response.json()
+        with st.status("Scraping discovery sources with Decodo...", expanded=True) as status:
+            response = requests.post(
+                f"{API_URL}/hunt",
+                json={"niche": niche},
+                timeout=REQUEST_TIMEOUT,
+            )
+            response.raise_for_status()
+            data = response.json()
+            status.update(label="Discovery scraping complete", state="complete")
         st.json(data)
 
-        with st.expander("Sources Decodo Will Scrape"):
+        with st.expander("Raw Discovery JSON"):
             st.json(data.get("discovery_data", []))
     except requests.exceptions.RequestException as error:
         st.error(f"Failed to connect to the backend: {error}")

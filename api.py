@@ -1,13 +1,16 @@
 """AI Product Hunter Automation - FastAPI backend.
 
 Local automation API for dropshipping product discovery, safety/quality
-screening, and supplier-aware ranking. Phase 3: builds the exact ten Decodo
-discovery-source payloads for a niche (no scraping calls yet).
+screening, and supplier-aware ranking. Phase 4: concurrent Decodo scraping
+of all ten discovery sources with per-source failure isolation.
 """
 
+import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote_plus
 
+import requests
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -17,6 +20,18 @@ from pydantic import BaseModel
 load_dotenv()
 
 BACKEND_PORT = 8000
+
+DECODO_API_URL = os.getenv("DECODO_API_URL") or "https://scraper-api.decodo.com/v2/scrape"
+DECODO_AUTH_TOKEN = os.getenv("DECODO_AUTH_TOKEN")
+DECODO_REQUEST_TIMEOUT = int(os.getenv("DECODO_REQUEST_TIMEOUT") or "120")
+DECODO_MAX_WORKERS = int(os.getenv("DECODO_MAX_WORKERS") or "5")
+
+if not DECODO_AUTH_TOKEN:
+    raise ValueError("Missing DECODO_AUTH_TOKEN in .env")
+
+# Decodo HTTP client. Defaults to the real requests module; tests monkeypatch
+# this attribute so no live Decodo call is ever made from the test suite.
+http = requests
 
 app = FastAPI(title="AI Product Hunter Automation API")
 
@@ -117,6 +132,61 @@ def build_source_urls(niche: str) -> list[dict]:
     return sources
 
 
+def scrape_with_decodo_payload(source_name: str, payload: dict) -> dict:
+    """Send one Decodo scrape request for a source payload.
+
+    Posts the payload directly as JSON (never wrapped in another "payload"
+    key). Failures — request errors, timeouts, non-2xx responses, and
+    invalid JSON — are caught here and returned as an "error" entry so a
+    single bad source can never crash the hunt path.
+    """
+    try:
+        response = http.post(
+            DECODO_API_URL,
+            json=payload,
+            headers={
+                "accept": "application/json",
+                "content-type": "application/json",
+                "authorization": f"Basic {DECODO_AUTH_TOKEN}",
+            },
+            timeout=(10, DECODO_REQUEST_TIMEOUT),
+        )
+        response.raise_for_status()
+        data = response.json()
+        return {"source": source_name, "request": payload, "data": data}
+    except Exception as error:
+        return {"source": source_name, "request": payload, "error": str(error)}
+
+
+def scrape_with_decodo(niche: str, logger=None) -> str:
+    """Scrape all ten discovery sources concurrently via Decodo.
+
+    Runs every payload from build_source_urls(niche) through a thread pool
+    while preserving source order in the results. Returns a JSON string with
+    one entry per attempted source; individual failures stay in the results
+    as error entries instead of aborting the run.
+    """
+    sources = build_source_urls(niche)
+    max_workers = max(1, min(len(sources), DECODO_MAX_WORKERS))
+
+    if logger:
+        logger(f"Discovery started: scraping {len(sources)} sources")
+
+    def _scrape(source: dict) -> dict:
+        result = scrape_with_decodo_payload(source["source"], source["payload"])
+        if logger:
+            if "error" in result:
+                logger(f"Discovery failed for {result['source']}: {result['error']}")
+            else:
+                logger(f"Discovery succeeded for {result['source']}")
+        return result
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = list(executor.map(_scrape, sources))
+
+    return json.dumps(results)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -124,16 +194,18 @@ def health():
 
 @app.post("/hunt")
 def hunt(request: HuntRequest):
-    # Temporary placeholder; the real pipeline lands in later phases.
+    # Phase 4: real concurrent Decodo discovery; later phases add screening,
+    # ranking, and supplier sourcing on top of these raw results.
+    discovery_data = json.loads(scrape_with_decodo(request.niche))
     return {
         "niche": request.niche,
-        "message": "Discovery sources built; Decodo scraping arrives in Phase 4",
+        "message": "Discovery scraped via Decodo; ranking pipeline arrives in later phases",
         "initial_products": [],
         "final_products": [],
         "supplier_summary": {},
         "supplier_data": [],
         "discovery_summary": [],
-        "discovery_data": build_source_urls(request.niche),
+        "discovery_data": discovery_data,
         "ranking_warnings": [],
     }
 
