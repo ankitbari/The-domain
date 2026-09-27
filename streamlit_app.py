@@ -33,7 +33,11 @@ if st.button("Hunt Products", type="primary"):
             timeout=REQUEST_TIMEOUT,
         )
         response.raise_for_status()
-        st.json(response.json())
+        data = response.json()
+        st.json(data)
+
+        with st.expander("Sources Decodo Will Scrape"):
+            st.json(data.get("discovery_data", []))
     except requests.exceptions.RequestException as error:
         st.error(f"Failed to connect to the backend: {error}")
         st.info(f"Make sure the FastAPI backend is running at {API_URL}.")
