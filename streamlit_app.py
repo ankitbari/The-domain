@@ -1,7 +1,8 @@
 """AI Product Hunter Automation - Streamlit frontend.
 
-Phase 2: minimal UI that submits a niche to the FastAPI backend's /hunt
-endpoint and renders the JSON response.
+Submits a niche to the FastAPI backend's /hunt endpoint. Phase 4: shows a
+live status while Decodo discovery scraping runs, then renders the result
+with the raw discovery JSON behind an expander.
 """
 
 import os
