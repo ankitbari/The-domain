@@ -1,1 +1,5 @@
-(empty)
+# Python compiled files
+__pycache__/
+*.pyc
+
+# Source code (explicitly not ignored, but ensuring cache is covered)
